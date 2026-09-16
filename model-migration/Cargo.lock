@@ -447,6 +447,7 @@ source = "git+https://github.com/erlkonig-ai/burn?rev=21adb25bb5277a1ff65179fa61
 dependencies = [
  "burn-autodiff",
  "burn-core",
+ "burn-cuda",
  "burn-dispatch",
  "burn-nn",
  "burn-optim",
@@ -552,6 +553,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "burn-cuda"
+version = "0.21.0"
+source = "git+https://github.com/erlkonig-ai/burn?rev=21adb25bb5277a1ff65179fa61442d8330d494d9#21adb25bb5277a1ff65179fa61442d8330d494d9"
+dependencies = [
+ "burn-backend",
+ "burn-cubecl",
+ "cubecl",
+]
+
+[[package]]
 name = "burn-derive"
 version = "0.21.0"
 source = "git+https://github.com/erlkonig-ai/burn?rev=21adb25bb5277a1ff65179fa61442d8330d494d9#21adb25bb5277a1ff65179fa61442d8330d494d9"
@@ -569,6 +580,7 @@ source = "git+https://github.com/erlkonig-ai/burn?rev=21adb25bb5277a1ff65179fa61
 dependencies = [
  "burn-autodiff",
  "burn-backend",
+ "burn-cuda",
  "burn-wgpu",
  "paste",
 ]
@@ -2831,7 +2843,7 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 [[package]]
 name = "jerky"
 version = "0.9.0"
-source = "git+https://github.com/triblespace/jerky.git?rev=fc0be54529f6bc0a6c5e7312cd649de21a7f3316#fc0be54529f6bc0a6c5e7312cd649de21a7f3316"
+source = "git+https://github.com/triblespace/jerky.git?rev=a03b927dc9d1fac0e6085f1275cd8f8504c36648#a03b927dc9d1fac0e6085f1275cd8f8504c36648"
 dependencies = [
  "anybytes",
  "num-traits",
@@ -6093,11 +6105,6 @@ checksum = "27bc9d5b815bc103f142aa054f561d9187d191692ec7c2d1e2b4737f8dbd7296"
 dependencies = [
  "zune-core",
 ]
-
-[[patch.unused]]
-name = "burn-cuda"
-version = "0.21.0"
-source = "git+https://github.com/erlkonig-ai/burn?rev=21adb25bb5277a1ff65179fa61442d8330d494d9#21adb25bb5277a1ff65179fa61442d8330d494d9"
 
 [[patch.unused]]
 name = "burn-dataset"
