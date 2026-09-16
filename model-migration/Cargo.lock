@@ -3128,7 +3128,6 @@ dependencies = [
  "burn-fusion",
  "ed25519-dalek",
  "half",
- "hifitime",
  "libc",
  "libm",
  "memmap2",

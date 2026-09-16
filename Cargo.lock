@@ -4030,7 +4030,6 @@ dependencies = [
  "gguf-rs-lib",
  "half",
  "hf-hub",
- "hifitime",
  "image",
  "libc",
  "libm",

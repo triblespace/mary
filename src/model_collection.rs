@@ -214,30 +214,10 @@ pub(crate) fn collection_or_create(
     signing_key: &SigningKey,
     name: &'static str,
 ) -> anyhow::Result<ModelCollection> {
-    collection_or_create_with_instant(pile, signing_key, name, None)
-}
-
-fn collection_or_create_at(
-    pile: &mut Pile,
-    signing_key: &SigningKey,
-    name: &'static str,
-    instant: hifitime::Epoch,
-) -> anyhow::Result<ModelCollection> {
-    collection_or_create_with_instant(pile, signing_key, name, Some(instant))
-}
-
-fn collection_or_create_with_instant(
-    pile: &mut Pile,
-    signing_key: &SigningKey,
-    name: &'static str,
-    instant: Option<hifitime::Epoch>,
-) -> anyhow::Result<ModelCollection> {
     let signer = signing_key.verifying_key();
-    let snapshot = match instant {
-        Some(instant) => pile.snapshot_at(instant),
-        None => pile.snapshot(),
-    }
-    .context("freeze model collection selection")?;
+    let snapshot = pile
+        .snapshot()
+        .context("freeze model collection selection")?;
     let collections = named_collections_in(&snapshot, name)?;
     match collections.as_slice() {
         [] => pile
@@ -275,16 +255,6 @@ pub fn model_bundle_collection_or_create(
     signing_key: &SigningKey,
 ) -> anyhow::Result<ModelCollection> {
     collection_or_create(pile, signing_key, mary_model_bundle_name())
-}
-
-/// Select or create the model-bundle collection using one caller-supplied
-/// authorization instant.
-pub fn model_bundle_collection_or_create_at(
-    pile: &mut Pile,
-    signing_key: &SigningKey,
-    instant: hifitime::Epoch,
-) -> anyhow::Result<ModelCollection> {
-    collection_or_create_at(pile, signing_key, mary_model_bundle_name(), instant)
 }
 
 pub fn publish_model_fragment(
