@@ -42,6 +42,8 @@ pub type FloatElem = f32;
 #[cfg(all(feature = "qwen3tts", target_os = "linux"))]
 pub mod speak {
     pub use burn::backend::cuda::CudaDevice as Device;
+    use burn_cubecl::cubecl;
+
     pub type Raw = burn_cubecl::CubeBackend<cubecl::cuda::CudaRuntime, f32, i32, u8>;
     pub type RawHalf = burn_cubecl::CubeBackend<cubecl::cuda::CudaRuntime, half::f16, i32, u8>;
     pub type Fused = burn_fusion::Fusion<Raw>;
