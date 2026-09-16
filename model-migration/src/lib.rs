@@ -2031,15 +2031,50 @@ mod tests {
             let valid = CollectionCommit::sign(&old, source, data, metadata);
             pile.insert(CollectionRecord::Commit(valid)).unwrap();
             let rejected = if invalid_signature {
-                let mut bytes = valid.to_bytes();
-                bytes[5 * 32] ^= 1;
-                CollectionCommit::from_bytes(bytes)
+                // A distinct member preserves the original valid source evidence
+                // when the second persisted COMMIT is corrupted below.
+                let rejected_data = pile
+                    .put::<blobencodings::SimpleArchive, _>(entity! {
+                        metadata::name: "independent-policy invalid-signature fixture",
+                    })
+                    .unwrap();
+                CollectionCommit::sign(
+                    &old,
+                    source,
+                    inlineencodings::Handle::<blobencodings::SimpleArchive>::to_hash(rejected_data),
+                    metadata,
+                )
             } else {
-                let commit = CollectionCommit::sign(&other, source, data, metadata);
-                commit.verify_strict().unwrap();
-                commit
+                CollectionCommit::sign(&other, source, data, metadata)
             };
+            rejected.verify_strict().unwrap();
             pile.insert(CollectionRecord::Commit(rejected)).unwrap();
+            let mut rejected_bytes = rejected.to_bytes();
+            if invalid_signature {
+                rejected_bytes[5 * 32] ^= 1;
+                assert!(CollectionCommit::from_bytes(rejected_bytes).is_err());
+                pile.close().unwrap();
+
+                // Only mutate the closed disposable fixture. The dense COMMIT
+                // occupies the final 192 bytes of its frame, with signature S
+                // in the last 32. Check the whole record before touching it.
+                let mut raw = std::fs::read(path.path()).unwrap();
+                let offset = raw.len() - rejected_bytes.len();
+                assert_eq!(&raw[offset..], &rejected.to_bytes());
+                raw[offset + 5 * 32] ^= 1;
+                assert_eq!(&raw[offset..], &rejected_bytes);
+                std::fs::write(path.path(), raw).unwrap();
+                pile = Pile::open(path.path()).unwrap();
+            }
+            {
+                let snapshot = pile.snapshot().unwrap();
+                let records: Vec<_> = snapshot.records().unwrap().map(Result::unwrap).collect();
+                assert!(records.contains(&CollectionRecord::Commit(valid)));
+                assert!(records.iter().any(|record| matches!(
+                    record,
+                    CollectionRecord::Commit(commit) if commit.to_bytes() == rejected_bytes
+                )));
+            }
             assert_policy_transfer_fails_before_publication(
                 &mut pile,
                 path.path(),
