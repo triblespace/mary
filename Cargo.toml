@@ -24,7 +24,6 @@ burn-fusion = { version = "0.21.0", optional = true }
 burn-cubecl = { version = "0.21.0", default-features = false, features = ["fusion"], optional = true }
 triblespace = { version = "0.47.0", path = "../triblespace-rs", default-features = false }
 anybytes = "0.20"
-hifitime = "4.1.2"
 # safetensors is IMPORT-ONLY: runtime builds load weights exclusively from
 # piles. Only the `import` feature (persist importers + parity gates) compiles
 # a safetensors reader — inference/serve builds cannot reach one.

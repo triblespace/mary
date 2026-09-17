@@ -29,7 +29,6 @@ use std::collections::BTreeSet;
 use anyhow::{anyhow, bail, Context};
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use triblespace::core::blob::{Blob, IntoBlob, TryFromBlob};
-use triblespace::core::clock::epoch_now;
 use triblespace::core::collection::records::{
     collection_name, collection_representation, CollectionHandle, KIND_COLLECTION_DESCRIPTOR,
 };
@@ -51,7 +50,7 @@ use triblespace::prelude::*;
 
 use mary::format::attrs;
 use mary::model_collection::{
-    model_bundle_collection_or_create_at, model_graph_collection_or_create,
+    model_bundle_collection_or_create, model_graph_collection_or_create,
     prepare_model_bundle_fragment, project_legacy_model_attributes, publish_model_fragment,
     snapshot_model_bundle_collection_exact, ModelCollection,
 };
@@ -892,8 +891,7 @@ fn adopt_legacy_personaplex_bundle_with_policy(
     let candidate = prepare_legacy_personaplex_candidate(legacy, &reader, policy)?;
     drop(reader);
 
-    let instant = epoch_now();
-    let collection = model_bundle_collection_or_create_at(pile, signing_key, instant)
+    let collection = model_bundle_collection_or_create(pile, signing_key)
         .context("select or create the PersonaPlex bundle collection")?;
     let prepared = prepare_model_bundle_fragment(candidate.model_root, candidate.fragment)
         .context("prepare canonical PersonaPlex bundle token")?;
@@ -903,7 +901,7 @@ fn adopt_legacy_personaplex_bundle_with_policy(
     // dependency. A matching `(root, H)` makes the operation a strict no-op;
     // a different PersonaPlex identity fails before a COMMIT can be exposed.
     let observation = pile
-        .snapshot_at(instant)
+        .snapshot()
         .context("freeze existing PersonaPlex bundle collection")?;
     let support = collection
         .admitted(&observation)
@@ -2908,10 +2906,8 @@ mod tests {
             before,
             "conflict staged dependencies before failing"
         );
-        let instant = epoch_now();
-        let collection =
-            model_bundle_collection_or_create_at(&mut pile, &migration_key, instant).unwrap();
-        let store = pile.snapshot_at(instant).unwrap();
+        let collection = model_bundle_collection_or_create(&mut pile, &migration_key).unwrap();
+        let store = pile.snapshot().unwrap();
         let cover = collection.admitted(&store).unwrap();
         let commits: Vec<_> = cover
             .commits(&store)
@@ -2982,10 +2978,8 @@ mod tests {
             before,
             "same-root different-H conflict staged dependencies"
         );
-        let instant = epoch_now();
-        let collection =
-            model_bundle_collection_or_create_at(&mut pile, &migration_key, instant).unwrap();
-        let store = pile.snapshot_at(instant).unwrap();
+        let collection = model_bundle_collection_or_create(&mut pile, &migration_key).unwrap();
+        let store = pile.snapshot().unwrap();
         let cover = collection.admitted(&store).unwrap();
         let commits: Vec<_> = cover
             .commits(&store)

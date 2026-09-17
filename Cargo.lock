@@ -3628,7 +3628,7 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 [[package]]
 name = "jerky"
 version = "0.9.0"
-source = "git+https://github.com/triblespace/jerky.git?rev=fc0be54529f6bc0a6c5e7312cd649de21a7f3316#fc0be54529f6bc0a6c5e7312cd649de21a7f3316"
+source = "git+https://github.com/triblespace/jerky.git?rev=a03b927dc9d1fac0e6085f1275cd8f8504c36648#a03b927dc9d1fac0e6085f1275cd8f8504c36648"
 dependencies = [
  "anybytes",
  "num-traits",
@@ -4030,7 +4030,6 @@ dependencies = [
  "gguf-rs-lib",
  "half",
  "hf-hub",
- "hifitime",
  "image",
  "libc",
  "libm",
