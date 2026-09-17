@@ -2030,16 +2030,26 @@ mod tests {
             let data = inlineencodings::Handle::<blobencodings::SimpleArchive>::to_hash(data_handle);
             let valid = CollectionCommit::sign(&old, source, data, metadata);
             pile.insert(CollectionRecord::Commit(valid)).unwrap();
-            let rejected = if invalid_signature {
+            if invalid_signature {
+                // The checked foreign decoder rejects bad signatures, so this
+                // fixture cannot mint an unverifiable COMMIT in memory any
+                // more. Corrupt the final persisted COMMIT instead, so the
+                // migration audits local evidence that arrived through the
+                // trusted persisted-ingress decoder — the same shape as the
+                // pre-authority sibling fixture above.
                 let mut bytes = valid.to_bytes();
                 bytes[5 * 32] ^= 1;
-                CollectionCommit::from_bytes(bytes)
+                assert!(CollectionCommit::from_bytes(bytes).is_err());
+                pile.close().unwrap();
+                let mut raw = std::fs::read(path.path()).unwrap();
+                *raw.last_mut().unwrap() ^= 1;
+                std::fs::write(path.path(), raw).unwrap();
+                pile = Pile::open(path.path()).unwrap();
             } else {
                 let commit = CollectionCommit::sign(&other, source, data, metadata);
                 commit.verify_strict().unwrap();
-                commit
-            };
-            pile.insert(CollectionRecord::Commit(rejected)).unwrap();
+                pile.insert(CollectionRecord::Commit(commit)).unwrap();
+            }
             assert_policy_transfer_fails_before_publication(
                 &mut pile,
                 path.path(),
