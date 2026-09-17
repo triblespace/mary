@@ -342,9 +342,7 @@ gemma = [
     # builds are supposed to happen. Nothing in the LIBRARY uses hf_hub (the
     # one hit in src/embed.rs is a doc comment). The binaries that need it now
     # say so in their own required-features, 2026-09-01.
-    "burn/train",
     "burn/ndarray",
-    "dep:burn-train",
     "dep:burn-ndarray",
     "dep:cubecl",
     "cubecl?/wgpu",
