@@ -3126,6 +3126,7 @@ dependencies = [
  "burn",
  "burn-cubecl",
  "burn-fusion",
+ "cubecl",
  "ed25519-dalek",
  "half",
  "libc",

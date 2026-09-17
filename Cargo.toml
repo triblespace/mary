@@ -261,7 +261,29 @@ smolvla = ["dep:image", "dep:tokenizers"]
 # Qwen3-TTS-12Hz-1.7B-Base (mary::models::qwen3tts) — streaming-voice
 # candidate A: talker + code predictor + ECAPA speaker encoder + 12Hz codec
 # decoder. Needs the Qwen2 BPE (tokenizers) + sampling (rand).
-qwen3tts = ["dep:tokenizers", "dep:burn-fusion", "dep:burn-cubecl", "dep:libm", "dep:memmap2", "dep:sha2"]
+#
+# `dep:cubecl` is here for ONE name: `nn::backend::speak` spells the Linux
+# voice lane `CubeBackend<cubecl::cuda::CudaRuntime, ..>`, and that path needs
+# the facade crate to be NAMEABLE. It adds no crate on either target, because
+# it is already in both graphs — measured 2026-09-17 by diffing
+# `cargo tree --edges normal --no-default-features --features qwen3tts` over
+# `--target aarch64-apple-darwin` and `--target aarch64-unknown-linux-gnu`:
+# 308 and 310 packages, byte-identical package sets before and after. On the
+# Mac the burn-cubecl / burn-wgpu / cubek stack this feature already builds on
+# pulls the facade in (`cargo tree -i cubecl` lists eight-plus dependents and
+# no `cubecl-cuda`); on Linux `burn`'s `cuda` feature is unconditional in the
+# target table below, so `cubecl-cuda` is in that graph either way. Same shape
+# as `cubek` in [dependencies] — naming a crate the graph already carries,
+# rather than adding one.
+#
+# It is deliberately NOT `cubecl?/cuda`: the cuda feature is target-scoped in
+# `[target.'cfg(target_os = "linux")'.dependencies]`, so the Mac keeps `std`
+# only and never links a CUDA toolkit. Without this, `--features qwen3tts` on
+# Linux did not compile at all (the `speak` module resolved
+# `burn::backend::cuda::CudaDevice` — burn/cuda being on — but not `cubecl`
+# itself), which is what `mary-model-migration` hit: it takes mary with
+# exactly this feature and nothing else.
+qwen3tts = ["dep:tokenizers", "dep:burn-fusion", "dep:burn-cubecl", "dep:cubecl", "dep:libm", "dep:memmap2", "dep:sha2"]
 # Research prototype: hand-fused cubecl kernels for the talker's single-token
 # decode step (qwen3tts::megakernel) — one dispatch per fused stage instead of
 # ~18 burn ops per layer. The lever is host submission count, not FLOPs.
