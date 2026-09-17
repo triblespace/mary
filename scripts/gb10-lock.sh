@@ -17,13 +17,29 @@
 #
 # THE MECHANISM. `mkdir` is atomic on every filesystem that matters: it either
 # creates the directory or fails, and two callers cannot both win. The directory
-# holds an `info` file naming pid, host, tag and start time, so a holder can be
-# identified rather than merely detected.
+# holds an `info` file naming host, tag, start time and last heartbeat, so a
+# holder can be identified rather than merely detected.
 #
-# BREAKING A STALE LOCK, in order of exactness:
-#   - the lock records a pid AND the host that pid lives on. If that host is the
-#     box we are on and the pid is gone, the lock is broken IMMEDIATELY. That is
-#     exact and needs no timeout.
+# BREAKING A STALE LOCK. Age is all we have. GB10_LOCK_TIMEOUT_S (default
+# 5400 s / 90 min) applies, chosen to clear a cold build of mary+burn+cubecl
+# plus ~18 min of measurement, so a healthy run is never broken into while one
+# crash costs at most one slot rather than the night.
+#
+# THERE IS DELIBERATELY NO PID-LIVENESS TEST, and this header used to promise
+# one: "the lock records a pid AND the host that pid lives on; if that host is
+# the box we are on and the pid is gone, the lock is broken IMMEDIATELY". That
+# was removed, because the pid it recorded was the transient ssh shell that took
+# the lock, which exits the instant the take returns -- so every lock was born
+# dead and the very next caller broke it. The take path below explains it again
+# at the point where the test used to live.
+#
+# The promise outlived the code. On 2026-09-17 a reader compared this paragraph
+# against a live info file, found no pid= line, and reported the ABSENCE as the
+# bug -- reasoning correctly from a description that was no longer true, and
+# very nearly restoring the exact test whose removal is documented forty lines
+# further down. A stale comment does not merely fail to help; it recruits people
+# into undoing the fix.
+#
 # TAKING THE LOCK OBLIGES YOU TO KEEP BEATING. Silence is indistinguishable
 # from death, by construction: a holder doing one long uninterrupted stretch
 # without calling `refresh` is treated as crashed once the timeout elapses and
@@ -33,12 +49,6 @@
 # second layer catches the consequence -- a breaker's idle gate immediately sees
 # the true holder's processes and refuses -- so the failure mode is a lost
 # reservation and a wasted slot rather than an OOM. Beat anyway.
-#
-#   - otherwise (the holder is a pid on the OTHER box, which is normal for a
-#     two-node run whose tail is remote) age is all we have, and GB10_LOCK_TIMEOUT_S
-#     (default 5400 s / 90 min) applies. Chosen to clear a cold build of
-#     mary+burn+cubecl plus ~18 min of measurement, so a healthy run is never
-#     broken into, while one crash costs at most one slot rather than the night.
 #
 # USAGE, and note every call passes paths in a FILE rather than on a command line:
 #   gb10-lock.sh take <host> <tag>     -> rc 0 took it, rc 3 someone else holds it
