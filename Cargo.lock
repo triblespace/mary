@@ -551,7 +551,6 @@ dependencies = [
  "burn-optim",
  "burn-rocm",
  "burn-std",
- "burn-train",
  "burn-vision",
  "burn-wgpu",
 ]
