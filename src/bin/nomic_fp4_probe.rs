@@ -295,11 +295,8 @@ fn extract(
         let handle = CollectionHandle::new(raw);
         let collection: Collection<SimpleArchive> = Collection::open(&snapshot, handle)
             .map_err(|e| anyhow!("open collection {name}: {e}"))?;
-        let support = collection
-            .admitted(&snapshot)
-            .map_err(|e| anyhow!("admitted support of {name}: {e:?}"))?;
         let facts: TribleSet = snapshot
-            .collection_exact(collection, &support)
+            .collection(collection)
             .map_err(|e| anyhow!("attach {name}: {e:?}"))?
             .view::<TribleSet>()
             .map_err(|e| anyhow!("view {name}: {e:?}"))?;

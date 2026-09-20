@@ -318,15 +318,29 @@ pub fn publish_model_bundle_fragment(
         .map_err(|error| anyhow!("publish model bundle: {error}"))
 }
 
+/// Attach the model collection and check it stands on `support`: what the
+/// caller selected must be what the store's root stands on now, or the
+/// caller is reading a different lattice than it thinks.
 pub fn snapshot_model_collection_exact<R: StoreRead>(
     store: &R,
     support: &Support,
 ) -> anyhow::Result<ModelSnapshot<R>> {
-    let facts = store
-        .collection_exact(support.collection(), support)
-        .context("attach exact model support")?
+    let attached = store
+        .collection(support.collection())
+        .context("attach model support")?;
+    let actual = attached
+        .support()
+        .context("resolve attached model support")?;
+    if actual != support {
+        anyhow::bail!(
+            "model collection stands on {} members, the selected support has {}",
+            actual.len(),
+            support.len()
+        );
+    }
+    let facts = attached
         .view::<TribleSet>()
-        .context("materialize exact model support")?;
+        .context("materialize model support")?;
     Ok(ModelSnapshot::new(facts, support.clone(), store.clone()))
 }
 
