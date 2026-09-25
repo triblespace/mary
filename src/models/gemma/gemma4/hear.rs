@@ -142,12 +142,25 @@ impl<B: Backend> Hearing<B> {
         wave: &[f32],
         prompt: &str,
         max_new: usize,
+        on_token: impl FnMut(&str),
+    ) -> String {
+        let audio = self.embed(wave);
+        self.understand_embeddings(&audio, prompt, max_new, on_token)
+    }
+
+    /// Decode audio rows produced by this hearing stack without encoding the
+    /// waveform a second time. Useful when a caller needs both rows and text.
+    pub fn understand_embeddings(
+        &self,
+        audio: &AudioEmbeddings,
+        prompt: &str,
+        max_new: usize,
         mut on_token: impl FnMut(&str),
     ) -> String {
+        if max_new == 0 {
+            return String::new();
+        }
         let device = &self.device;
-
-        // --- Transcriber: log-mel → tower → embedder ---
-        let audio = self.embed(wave);
         let n_audio_tokens = audio.n_tokens;
 
         // --- Chat frame ---
@@ -231,7 +244,7 @@ impl<B: Backend> Hearing<B> {
                 .unwrap_or_default();
             on_token(&piece);
             out.push_str(&piece);
-            for _ in 0..max_new {
+            for _ in 1..max_new {
                 let inp = Tensor::<B, 1, Int>::from_ints([cur as i32], device).reshape([1, 1]);
                 let l = self.model.forward_cached(
                     inp,
