@@ -2933,6 +2933,7 @@ pub fn load_nomic_mm7b_aliased_from_snapshot(
 mod native_model_snapshot_tests {
     use super::*;
     use crate::format::attrs;
+    use ed25519_dalek::SigningKey;
     use std::fs::OpenOptions;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
