@@ -34,7 +34,7 @@ use triblespace::core::collection::records::{
 };
 use triblespace::core::collection::{
     AdmissionPolicy, CollectionCommit, CollectionData, CollectionPolicy, CollectionRead,
-    CollectionRecord, CollectionStore, CollectionStoreExt,
+    CollectionRecord, CollectionRecordSelector, CollectionStore, CollectionStoreExt, Cover,
 };
 use triblespace::core::inline::encodings::ed25519::ED25519PublicKey;
 use triblespace::core::metadata::{self, MetaDescribe};
@@ -56,6 +56,39 @@ use mary::model_collection::{
 };
 use mary::models::personaplex::{PersonaPlexWeights, SOURCE as PERSONAPLEX_SOURCE};
 use mary::selection::{select_model_root, select_tokenizer_root, ModelSelector, TokenizerSelector};
+
+/// Every COMMIT naming one of `cover`'s members in its collection, whichever
+/// key signed it: provenance, not admission. One `CommitMember` probe per
+/// member on the record index, as the core's `Cover::commits` did until the
+/// core dropped it (triblespace bfef707e); nothing is enumerated. Returned in
+/// canonical record order, so no caller depends on how a store lays records
+/// out.
+fn member_commits<S>(
+    cover: &Cover<blobencodings::SimpleArchive>,
+    snapshot: &S,
+) -> Result<Vec<CollectionCommit>, S::RecordsError>
+where
+    S: CollectionRead,
+{
+    let collection = cover.collection().handle();
+    let selectors: BTreeSet<CollectionRecordSelector> = cover
+        .members()
+        .map(|member| CollectionRecordSelector::CommitMember(collection, Inline::new(member.raw)))
+        .collect();
+    if selectors.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut commits: Vec<_> = snapshot
+        .select_records(&selectors)?
+        .into_iter()
+        .filter_map(|record| match record {
+            CollectionRecord::Commit(commit) => Some(commit),
+            _ => None,
+        })
+        .collect();
+    commits.sort();
+    Ok(commits)
+}
 
 const PERSONAPLEX_LM_FILE: &str = "model.safetensors";
 const PERSONAPLEX_MIMI_FILE: &str = "tokenizer-e351c8d8-checkpoint125.safetensors";
@@ -921,8 +954,7 @@ fn adopt_legacy_personaplex_bundle_with_policy(
         // A retry must return a COMMIT whose writer is admitted by this same
         // frozen observation, even if another key also signed the token.
         let mut admitted_commit = None;
-        for commit in support
-            .commits(&observation)
+        for commit in member_commits(&support, &observation)
             .context("read existing PersonaPlex token provenance")?
         {
             if commit.data() != token_data {
@@ -2265,8 +2297,7 @@ mod tests {
             first.collection,
         );
         let support = first.collection.admitted(&snapshot).unwrap();
-        let admitted: Vec<_> = support
-            .commits(&snapshot)
+        let admitted: Vec<_> = member_commits(&support, &snapshot)
             .unwrap()
             .into_iter()
             .filter(|commit| {
@@ -2796,7 +2827,7 @@ mod tests {
         let support = first.collection.admitted(&observation).unwrap();
         assert_eq!(support.len(), 1);
         assert_eq!(
-            support.commits(&observation).unwrap(),
+            member_commits(&support, &observation).unwrap(),
             vec![unadmitted, first.commit],
             "the unadmitted attestation must sort before the legitimate retry result"
         );
@@ -2919,8 +2950,7 @@ mod tests {
         let collection = model_bundle_collection_or_create(&mut pile, &migration_key).unwrap();
         let store = pile.snapshot().unwrap();
         let cover = collection.admitted(&store).unwrap();
-        let commits: Vec<_> = cover
-            .commits(&store)
+        let commits: Vec<_> = member_commits(&cover, &store)
             .unwrap()
             .into_iter()
             .filter(|commit| {
@@ -2991,8 +3021,7 @@ mod tests {
         let collection = model_bundle_collection_or_create(&mut pile, &migration_key).unwrap();
         let store = pile.snapshot().unwrap();
         let cover = collection.admitted(&store).unwrap();
-        let commits: Vec<_> = cover
-            .commits(&store)
+        let commits: Vec<_> = member_commits(&cover, &store)
             .unwrap()
             .into_iter()
             .filter(|commit| {
