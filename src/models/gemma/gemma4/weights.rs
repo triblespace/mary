@@ -510,7 +510,7 @@ pub(crate) fn load_gemma4_from_source<B: Backend>(
     // Embedding: single [vocab, hidden] tensor. 31B lands at 5.6 GiB (past
     // wgpu's default 4 GiB binding cap) — use `gaze::metal_device` to build
     // a raised-limit device before calling this.
-    println!("  Loading embeddings...");
+    eprintln!("  Loading embeddings...");
     let embed = make_embedding::<B>(
         load_2d::<B>(ctx, "embed_tokens.weight", device, false),
         device,
@@ -520,7 +520,7 @@ pub(crate) fn load_gemma4_from_source<B: Backend>(
     // This is the largest single tensor (8.8GB f32 for E2B) — load and split per-layer.
     // Each layer gets a [vocab_size, ple_dim] slice.
     let ple_slices: Option<Vec<Tensor<B, 2>>> = if tc.has_ple() {
-        println!("  Loading PLE embedding (per-layer slices)...");
+        eprintln!("  Loading PLE embedding (per-layer slices)...");
         let actual = resolve_name(ctx, "embed_tokens_per_layer.weight");
         let ple_dim = tc.hidden_size_per_layer_input;
         // Scale by sqrt(ple_dim) — matches Gemma4TextScaledWordEmbedding behavior.
@@ -572,7 +572,7 @@ pub(crate) fn load_gemma4_from_source<B: Backend>(
     let mut layers = Vec::with_capacity(tc.num_hidden_layers);
     for i in 0..tc.num_hidden_layers {
         let p = format!("layers.{i}");
-        println!("  Loading layer {i}/{}", tc.num_hidden_layers);
+        eprintln!("  Loading layer {i}/{}", tc.num_hidden_layers);
 
         let layer_type = tc.layer_type(i);
         let (n_kv_heads, head_dim) = match layer_type {
@@ -738,7 +738,7 @@ pub(crate) fn load_gemma4_from_source<B: Backend>(
     // Model-level PLE projection (E2B/E4B)
     let (per_layer_model_projection, per_layer_projection_norm, ple_proj_scale, ple_input_scale) =
         if tc.has_ple() {
-            println!("  Loading PLE model projection...");
+            eprintln!("  Loading PLE model projection...");
             let proj = make_linear(
                 load_2d::<B>(ctx, "per_layer_model_projection.weight", device, true),
                 device,
@@ -757,7 +757,7 @@ pub(crate) fn load_gemma4_from_source<B: Backend>(
         };
 
     // Final norm
-    println!("  Loading output head...");
+    eprintln!("  Loading output head...");
     let norm = make_rms_norm(load_1d::<B>(ctx, "norm.weight", device), eps, device);
 
     // LM head. When tied to the embedding we don't allocate anything new —
@@ -790,7 +790,7 @@ pub(crate) fn load_gemma4_from_source<B: Backend>(
         load_vision_encoder::<B>(&vision_config, tc.hidden_size, ctx, device)
     });
 
-    println!("All Gemma 4 weights loaded.");
+    eprintln!("All Gemma 4 weights loaded.");
 
     (
         Gemma4Model {

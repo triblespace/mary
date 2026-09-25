@@ -32,6 +32,21 @@ pub type BFusedHalf = burn_fusion::Fusion<
 
 pub type FloatElem = f32;
 
+/// Hearing uses native CUDA on Linux, including Gemma's multi-GiB vocabulary
+/// embedding (which failed to allocate through WGPU on the Spark).
+/// Keep the other model families' backend choices unchanged.
+#[cfg(feature = "gemma")]
+pub mod hear {
+    #[cfg(target_os = "linux")]
+    pub use burn::backend::cuda::CudaDevice as Device;
+    #[cfg(target_os = "linux")]
+    pub type B = burn::backend::Cuda<f32, i32>;
+    #[cfg(not(target_os = "linux"))]
+    pub use super::WgpuDevice as Device;
+    #[cfg(not(target_os = "linux"))]
+    pub type B = super::B;
+}
+
 /// The VOICE's backend family: the talker (raw, f16 by default), the speaker
 /// encoder (raw) and the codec (fusion-wrapped f32), plus their device. On the
 /// Mac these are the Metal aliases above; on Linux they are CUDA, because the
