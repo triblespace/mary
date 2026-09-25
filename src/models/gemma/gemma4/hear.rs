@@ -45,6 +45,14 @@ pub struct AudioEmbeddings {
     pub rows: Vec<f32>,
 }
 
+/// Greedy transcription plus whether generation exhausted its token budget
+/// without observing the model's end-of-turn/end-of-sequence token.
+#[derive(Debug, Clone)]
+pub struct Transcript {
+    pub text: String,
+    pub token_limit_reached: bool,
+}
+
 impl AudioEmbeddings {
     /// One row, or `None` past the end.
     pub fn row(&self, index: usize) -> Option<&[f32]> {
@@ -146,6 +154,7 @@ impl<B: Backend> Hearing<B> {
     ) -> String {
         let audio = self.embed(wave);
         self.understand_embeddings(&audio, prompt, max_new, on_token)
+            .text
     }
 
     /// Decode audio rows produced by this hearing stack without encoding the
@@ -156,9 +165,12 @@ impl<B: Backend> Hearing<B> {
         prompt: &str,
         max_new: usize,
         mut on_token: impl FnMut(&str),
-    ) -> String {
+    ) -> Transcript {
         if max_new == 0 {
-            return String::new();
+            return Transcript {
+                text: String::new(),
+                token_limit_reached: true,
+            };
         }
         let device = &self.device;
         let n_audio_tokens = audio.n_tokens;
@@ -266,6 +278,9 @@ impl<B: Backend> Hearing<B> {
                 out.push_str(&piece);
             }
         }
-        out
+        Transcript {
+            text: out,
+            token_limit_reached: !stop(cur as u32),
+        }
     }
 }

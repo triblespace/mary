@@ -5,7 +5,10 @@
 //! seam (`gemma_listen` runs the same seam in a live loop). Weights come ONLY
 //! from a native model-collection pile (create one with `mary import <model>
 //! --pile <path> --key <key>`); `config.json` + `tokenizer.json` stay small
-//! files resolved from the local HF snapshot of `--model` (default E4B). The
+//! files resolved from the local HF snapshot of `--model` (default E4B).
+//! Explicit `--config-json` and `--tokenizer-json` bypass that resolution for
+//! pinned offline controls. This uses the same hearing-specific backend as
+//! the resident faculty: CUDA on Linux, WGPU elsewhere. The
 //! audio path is parity-gated per stage against
 //! HF goldens (`gemma_audio_parity`, cos = 1.0 features/tower/embedder/cascade,
 //! shards AND pile, 2026-07-10).
@@ -24,19 +27,17 @@
 //!
 //! `--pile` falls back to the `GEMMA_PILE` env var.
 
-use burn::backend::wgpu::{Wgpu, WgpuDevice};
 use burn::prelude::*;
 use mary::models::gemma::gemma4::audio_load::load_audio_16k_mono;
 use mary::models::gemma::gemma4::config::Gemma4Config;
 use mary::models::gemma::gemma4::hear::Hearing;
+use mary::nn::backend::hear::{Device, B};
 use mary::persist::load_gemma4_hearing_from_pile;
 use std::io::Write;
 use std::path::Path;
 use std::process::Command;
 use std::time::Instant;
 use tokenizers::Tokenizer;
-
-type B = Wgpu;
 
 /// Resolve a SMALL side-file (config.json / tokenizer.json) from the local HF
 /// snapshot. Weights never come from here — they load from the pile.
@@ -98,7 +99,7 @@ fn main() {
         });
     let model_id = arg(&args, "--model").unwrap_or_else(|| "google/gemma-4-E4B-it".into());
 
-    let device = WgpuDevice::default();
+    let device = Device::default();
 
     // --- Load audio from disk (symphonia + rubato) ---
     println!("Loading {audio_path}...");
@@ -108,12 +109,14 @@ fn main() {
     println!("  {} samples @ 16 kHz ({audio_secs:.2}s)", wave.len());
 
     // --- Load model + audio tower + embedder (weights: pile-only) ---
-    let config_path = find_hf_file(&model_id, "config.json");
+    let config_path =
+        arg(&args, "--config-json").unwrap_or_else(|| find_hf_file(&model_id, "config.json"));
     let mut config = Gemma4Config::load(Path::new(&config_path));
     // This is the hearing path: skip the vision tower so the footprint numbers
     // reflect hearing alone (decoder + audio tower + embedder).
     config.vision_config = None;
-    let tokenizer_path = find_hf_file(&model_id, "tokenizer.json");
+    let tokenizer_path =
+        arg(&args, "--tokenizer-json").unwrap_or_else(|| find_hf_file(&model_id, "tokenizer.json"));
     let tokenizer = Tokenizer::from_file(&tokenizer_path).unwrap();
 
     println!("Loading model from pile {pile}...");
@@ -135,7 +138,7 @@ fn main() {
     );
 
     // --- Transcriber-stage meter: soft-token rate + encode realtime factor ---
-    // Cold pass includes wgpu shader compilation; warm is the steady state an
+    // Cold pass includes GPU kernel compilation; warm is the steady state an
     // always-on hearing loop would see. The readback forces GPU sync, so the
     // timing covers the full features→tower→embedder→CPU path.
     let fe = mary::models::gemma::gemma4::audio_preprocess::AudioFeatureExtractor::new();

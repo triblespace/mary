@@ -147,6 +147,12 @@ fn decode_audio_16k_mono(
 /// capture path (`gemma_listen` resamples each finished utterance segment).
 pub fn resample_to_16k(mono: Vec<f32>, src_rate: usize) -> Result<Vec<f32>, String> {
     let dst_rate = 16_000usize;
+    if src_rate == 0 {
+        return Err("sample rate must be positive".to_owned());
+    }
+    if mono.is_empty() {
+        return Ok(mono);
+    }
     if src_rate == dst_rate {
         return Ok(mono);
     }
@@ -162,7 +168,6 @@ pub fn resample_to_16k(mono: Vec<f32>, src_rate: usize) -> Result<Vec<f32>, Stri
     let chunk = 4096usize;
     let mut resampler = SincFixedIn::<f32>::new(ratio, 2.0, params, chunk, 1)
         .map_err(|e| format!("rubato init: {e}"))?;
-    let delay = resampler.output_delay();
     let mut out = Vec::with_capacity((mono.len() as f64 * ratio) as usize + 1024);
     let mut i = 0;
     while i + chunk <= mono.len() {
@@ -181,23 +186,92 @@ pub fn resample_to_16k(mono: Vec<f32>, src_rate: usize) -> Result<Vec<f32>, Stri
         let waves_out = resampler
             .process(&waves_in, None)
             .map_err(|e| format!("rubato process tail: {e}"))?;
-        // Trim the output to account for the zero-padded tail.
-        let valid_out = ((mono.len() - i) as f64 * ratio).ceil() as usize;
-        out.extend(waves_out[0].iter().take(valid_out));
+        // This also contains delayed real samples. Trim only after draining,
+        // not at the input chunk boundary.
+        out.extend_from_slice(&waves_out[0]);
     }
 
-    // Skip the leading resampler delay so samples align with the source.
-    let skipped: Vec<f32> = out.into_iter().skip(delay).collect();
-    // Truncate to expected output length.
     let expected = (mono.len() as f64 * ratio).round() as usize;
-    let final_out: Vec<f32> = skipped.into_iter().take(expected).collect();
-    Ok(final_out)
+    // A clip ending on a full input chunk still has audio in the filter.
+    // Zero input drains that state; no output beyond the source duration is
+    // returned. This matters for Complete and forced VAD boundaries in speech.
+    while out.len() < expected {
+        let waves_out = resampler
+            .process(&[vec![0.0f32; chunk]], None)
+            .map_err(|e| format!("rubato drain: {e}"))?;
+        if waves_out[0].is_empty() {
+            return Err("resampler made no progress while draining".to_owned());
+        }
+        out.extend_from_slice(&waves_out[0]);
+    }
+    // In the pinned SincFixedIn 0.16, the initial negative half-kernel index
+    // already aligns the sinc center with the source. Skipping output_delay()
+    // here shifts real signal earlier (85 samples at 24 kHz -> 16 kHz).
+    // The impulse-position and trailing-signal controls below pin this, rather
+    // than assuming buffering latency means leading silent output samples.
+    Ok(out.into_iter().take(expected).collect())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::io::Write as _;
+
+    #[test]
+    fn resampling_preserves_impulse_positions_in_the_source_clock() {
+        for rate in [24_000, 48_000] {
+            for position in [rate / 10, rate / 2, rate * 9 / 10] {
+                let mut wave = vec![0.0; rate];
+                wave[position] = 1.0;
+                let out = resample_to_16k(wave, rate).unwrap();
+                let peak = out
+                    .iter()
+                    .enumerate()
+                    .max_by(|a, b| a.1.abs().total_cmp(&b.1.abs()))
+                    .unwrap()
+                    .0;
+                let expected = position * 16_000 / rate;
+                assert!(
+                    peak.abs_diff(expected) <= 1,
+                    "rate={rate}, peak={peak}, expected={expected}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn resampling_drains_real_tail_at_partial_and_exact_chunk_boundaries() {
+        for rate in [24_000, 48_000] {
+            for len in [1, 4096, 4097, 24_000, 48_000] {
+                let mut wave = vec![0.0; len];
+                // Signal confined to the tail catches zero-padding in lieu
+                // of draining; the one-sample case checks bounded length only.
+                let tail = len.min(32);
+                wave[len - tail..].fill(0.5);
+                let out = resample_to_16k(wave, rate).unwrap();
+                let expected = (len as f64 * 16_000.0 / rate as f64).round() as usize;
+                assert_eq!(out.len(), expected, "rate={rate}, len={len}");
+                assert!(out.iter().all(|sample| sample.is_finite()));
+                if len > 1 {
+                    let peak = out
+                        .iter()
+                        .enumerate()
+                        .max_by(|a, b| a.1.abs().total_cmp(&b.1.abs()))
+                        .unwrap();
+                    assert!(
+                        out.last().unwrap().abs() > 0.1,
+                        "tail lost: rate={rate}, len={len}, peak={peak:?}, last={:?}, expected={expected}", out.last()
+                    );
+                }
+            }
+        }
+        assert_eq!(
+            resample_to_16k(vec![0.25, -0.5], 16_000).unwrap(),
+            [0.25, -0.5]
+        );
+        assert!(resample_to_16k(vec![0.0], 0).is_err());
+        assert!(resample_to_16k(Vec::new(), 48_000).unwrap().is_empty());
+    }
 
     fn stereo_wav() -> Vec<u8> {
         let samples = [0_i16, 0, 8192, 24576, -8192, -24576, 16384, -16384];
