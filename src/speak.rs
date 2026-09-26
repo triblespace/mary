@@ -167,7 +167,9 @@ impl Qwen3TtsVariant {
 ///
 /// Four ordinary model roots exhaust the live tensors: the variant's exact
 /// base, one codec shared by both variants, a filtered f16 talker, and its
-/// pre-folded f16 GPU layout. Only the compact leaf indexes remain resident —
+/// pre-folded f16 GPU layout. The last two are the Metal zero-copy layout and
+/// are selected on macOS only; every other target loads the talker from the
+/// exact roots and needs just the first two. Only the compact leaf indexes remain resident —
 /// each leaf holds its bytes as a view over the pile's mapping and keeps that
 /// mapping alive, so no reader is retained. No Repository ancestry or
 /// sibling-file naming participates in runtime selection.
@@ -250,20 +252,32 @@ impl Qwen3TtsWeights {
                 }
             }
         }
-        let talker_f16 = select(
-            snapshot.facts(),
-            snapshot.store(),
-            &talker_source,
-            QUANTIZATION_F16,
-        )?;
-        let folded_f16 = select(
-            snapshot.facts(),
-            snapshot.store(),
-            &folded_source,
-            QUANTIZATION_F16,
-        )?;
-        require_width("talker-f16", &talker_f16, true)?;
-        require_width("talker-folded-f16", &folded_f16, true)?;
+        // The f16 talker and its pre-folded layout are the Metal zero-copy
+        // path (`into_loader`, `folded_talker`); every other target loads the
+        // talker from the exact roots, so it neither selects nor needs them.
+        #[cfg(target_os = "macos")]
+        let (talker_f16, folded_f16) = {
+            let talker_f16 = select(
+                snapshot.facts(),
+                snapshot.store(),
+                &talker_source,
+                QUANTIZATION_F16,
+            )?;
+            let folded_f16 = select(
+                snapshot.facts(),
+                snapshot.store(),
+                &folded_source,
+                QUANTIZATION_F16,
+            )?;
+            require_width("talker-f16", &talker_f16, true)?;
+            require_width("talker-folded-f16", &folded_f16, true)?;
+            (talker_f16, folded_f16)
+        };
+        #[cfg(not(target_os = "macos"))]
+        let (talker_f16, folded_f16) = {
+            let _ = (&talker_source, &folded_source);
+            (HashMap::new(), HashMap::new())
+        };
         drop(snapshot);
         Ok(Self {
             variant,
@@ -1239,6 +1253,14 @@ mod tests {
         pile.close().expect("close synthetic Qwen3-TTS pile");
     }
 
+    /// Selected roots per component: exact base and codec everywhere, and the
+    /// Metal-only f16 talker and folded layout on macOS alone.
+    const SELECTED: (usize, usize, usize) = if cfg!(target_os = "macos") {
+        (2, 1, 1)
+    } else {
+        (2, 0, 0)
+    };
+
     fn cohort(variant: Qwen3TtsVariant, form: crate::leaf::Form) -> [Fragment; 4] {
         [
             component_fragment(
@@ -1315,25 +1337,27 @@ mod tests {
                 .expect("freeze native Qwen3-TTS snapshot");
             let weights = Qwen3TtsWeights::from_snapshot(snapshot, variant)
                 .unwrap_or_else(|e| panic!("{} cohort must select: {e:#}", form.label()));
-            assert_eq!(weights.counts(), (2, 1, 1), "{}", form.label());
+            assert_eq!(weights.counts(), SELECTED, "{}", form.label());
             assert_eq!(
                 weights.exact["base.weight"].elem(),
                 Elem::F32,
                 "{}",
                 form.label()
             );
-            assert_eq!(
-                weights.talker_f16["talker.weight"].elem(),
-                Elem::F16,
-                "{}",
-                form.label()
-            );
-            assert_eq!(
-                weights.folded_f16["talker.folded.weight"].shape(),
-                vec![1],
-                "{}",
-                form.label()
-            );
+            if cfg!(target_os = "macos") {
+                assert_eq!(
+                    weights.talker_f16["talker.weight"].elem(),
+                    Elem::F16,
+                    "{}",
+                    form.label()
+                );
+                assert_eq!(
+                    weights.folded_f16["talker.folded.weight"].shape(),
+                    vec![1],
+                    "{}",
+                    form.label()
+                );
+            }
         }
     }
 
@@ -1348,7 +1372,7 @@ mod tests {
         let weights = Qwen3TtsWeights::from_snapshot(snapshot, variant)
             .expect("select complete native Qwen3-TTS cohort");
         assert_eq!(weights.variant(), variant);
-        assert_eq!(weights.counts(), (2, 1, 1));
+        assert_eq!(weights.counts(), SELECTED);
         assert!(weights.exact.contains_key("base.weight"));
         assert!(weights.exact.contains_key("codec.weight"));
 
@@ -1365,7 +1389,7 @@ mod tests {
                 crate::leaf::Form::TwoBlob,
             )],
         );
-        assert_eq!(weights.counts(), (2, 1, 1));
+        assert_eq!(weights.counts(), SELECTED);
 
         let widened = crate::model_collection::load_model_collection_local_latest(file.path())
             .expect("load widened native Qwen3-TTS snapshot");

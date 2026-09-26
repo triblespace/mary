@@ -1,11 +1,14 @@
 //! Import one Qwen3-TTS checkpoint cohort into Mary's native model collection.
 //!
-//! The result is four ordinary model roots in one append-only pile:
+//! The result is ordinary model roots in one append-only pile:
 //!
 //! - the variant's exact base checkpoint;
 //! - the exact codec checkpoint shared by both Qwen sizes;
-//! - the variant's filtered f16 talker tensors;
-//! - the variant's versioned, pre-folded f16 talker tensors.
+//! - on macOS, the variant's filtered f16 talker tensors;
+//! - on macOS, the variant's versioned, pre-folded f16 talker tensors.
+//!
+//! The last two are the Metal zero-copy layout. Every other target loads the
+//! talker from the exact roots, so there the pile holds the first two only.
 //!
 //! The folded root is derived through the same production `Talker` load and
 //! readback used by the zero-copy lane, then published with the same tensor-leaf
@@ -22,27 +25,34 @@
 //!   <model-dir> <pile-path> <signing-key>
 //! ```
 
-#[cfg(target_os = "macos")]
 mod imp {
     use mary::ingest::LeafDtype;
+    #[cfg(target_os = "macos")]
     use mary::models::qwen3tts::talker::Talker;
+    #[cfg(target_os = "macos")]
     use mary::nn::backend::{BFusedHalf, WgpuDevice};
+    #[cfg(target_os = "macos")]
     use mary::nn::weight_loader::{AliasedPile, WeightLoader};
-    use mary::speak::{QUANTIZATION_F16, Qwen3TtsVariant, Qwen3TtsWeights};
+    #[cfg(target_os = "macos")]
+    use mary::speak::QUANTIZATION_F16;
+    use mary::speak::{Qwen3TtsVariant, Qwen3TtsWeights};
     use std::path::Path;
     use std::time::Instant;
     use triblespace::core::repo::pile::Pile;
     use triblespace::core::signing_key_file;
+    #[cfg(target_os = "macos")]
     use triblespace::prelude::{ExclusiveId, entity};
 
     /// Everything the GPU talker loads, excluding the code predictor and
     /// codec-head CPU stages which deliberately remain exact f32.
+    #[cfg(target_os = "macos")]
     fn is_gpu_talker_tensor(name: &str) -> bool {
         name.starts_with("talker.")
             && !name.starts_with("talker.code_predictor.")
             && name != "talker.codec_head.weight"
     }
 
+    #[cfg(target_os = "macos")]
     fn select_index(
         snapshot: &mary::model_collection::ModelPileSnapshot,
         root: triblespace::prelude::Id,
@@ -57,8 +67,6 @@ mod imp {
         variant: Qwen3TtsVariant,
     ) -> anyhow::Result<()> {
         let base_source = variant.base_source();
-        let talker_source = variant.talker_f16_source();
-        let folded_source = variant.folded_f16_source();
 
         eprintln!("[qwen3tts] importing exact base {base_source}");
         let (base_root, _base_commit) = mary::persist::import_model_to_collection(
@@ -83,6 +91,37 @@ mod imp {
             mary::persist::QUANTIZATION_NATIVE,
         )?;
 
+        #[cfg(target_os = "macos")]
+        import_metal_talker(pile, signing_key, model_dir, variant, base_root, codec_root)?;
+        #[cfg(not(target_os = "macos"))]
+        {
+            // Every other target loads the talker from the exact roots; the
+            // f16 talker and its folded layout are Metal's zero-copy path, so
+            // they are neither derived nor published here.
+            let complete = mary::model_collection::snapshot_model_collection_local_latest(pile)?;
+            let weights = Qwen3TtsWeights::from_snapshot(complete, variant)?;
+            let (exact_count, _, _) = weights.counts();
+            eprintln!(
+                "[qwen3tts] native cohort valid for this target: base={base_root}, \
+                 codec={codec_root}; {exact_count} exact tensors"
+            );
+        }
+        Ok(())
+    }
+
+    /// The Metal zero-copy layout: the filtered f16 talker and its folded
+    /// derivative, derived through the production Metal talker.
+    #[cfg(target_os = "macos")]
+    fn import_metal_talker(
+        pile: &mut Pile,
+        signing_key: &ed25519_dalek::SigningKey,
+        model_dir: &Path,
+        variant: Qwen3TtsVariant,
+        base_root: triblespace::prelude::Id,
+        codec_root: triblespace::prelude::Id,
+    ) -> anyhow::Result<()> {
+        let talker_source = variant.talker_f16_source();
+        let folded_source = variant.folded_f16_source();
         eprintln!("[qwen3tts] importing filtered f16 talker {talker_source}");
         let (talker_root, _talker_commit) =
             mary::persist::import_safetensors_file_filtered_to_collection(
@@ -221,13 +260,6 @@ mod imp {
     }
 }
 
-#[cfg(target_os = "macos")]
 fn main() -> anyhow::Result<()> {
     imp::run()
-}
-
-#[cfg(not(target_os = "macos"))]
-fn main() {
-    eprintln!("qwen3tts_persist requires macOS to derive the production folded Metal layout");
-    std::process::exit(2);
 }
